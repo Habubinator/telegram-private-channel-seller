@@ -69,10 +69,11 @@ class SubscriptionBot {
             }
         });
 
-        // Проверка истекших подписок каждые 5 минут
-        cron.schedule("*/5 * * * *", async () => {
+        // Проверка истекших подписок каждый час
+        cron.schedule("0 * * * *", async () => {
             try {
                 await this.removeExpiredSubscriptions();
+                this.cryptoMonitor.clearProcessedCache();
             } catch (error) {
                 console.error("Error removing expired subscriptions:", error);
             }

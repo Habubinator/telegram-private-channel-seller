@@ -49,67 +49,80 @@ export class CryptoMonitor {
     }
 
     private async checkTRXTransactions(payment: any) {
-        const account = await this.tronWeb.trx.getAccount(
-            payment.cryptoAddress
-        );
+        try {
+            // Получаем транзакции адреса с помощью правильного API
+            const response = await this.tronWeb.fullNode.request(
+                "v1/accounts/" + payment.cryptoAddress + "/transactions",
+                {
+                    limit: 20,
+                    only_to: true, // Только входящие транзакции
+                    order_by: "block_timestamp,desc",
+                },
+                "get"
+            );
 
-        if (!account.address) return;
+            if (!response.data || !Array.isArray(response.data)) {
+                return;
+            }
 
-        // Получаем последние транзакции
-        const transactions = await this.tronWeb.trx.getTransactionsFromAddress(
-            payment.cryptoAddress,
-            3, // Лимит
-            0 // Смещение
-        );
+            for (const tx of response.data) {
+                if (this.processedTxs.has(tx.txID)) continue;
 
-        for (const tx of transactions) {
-            if (this.processedTxs.has(tx.txID)) continue;
-
-            // Проверяем, что это входящая транзакция с правильной суммой
-            if (this.isValidTRXTransaction(tx, payment)) {
-                try {
-                    await this.paymentService.handleCryptoPayment(tx.txID);
-                    this.processedTxs.add(tx.txID);
-                    console.log(`Processed TRX payment: ${tx.txID}`);
-                } catch (error) {
-                    console.error(
-                        `Error processing TRX transaction ${tx.txID}:`,
-                        error
-                    );
+                // Проверяем, что это входящая TRX транзакция с правильной суммой
+                if (this.isValidTRXTransaction(tx, payment)) {
+                    try {
+                        await this.paymentService.handleCryptoPayment(tx.txID);
+                        this.processedTxs.add(tx.txID);
+                        console.log(`✅ Processed TRX payment: ${tx.txID}`);
+                        break; // Выходим после первой найденной транзакции
+                    } catch (error) {
+                        console.error(
+                            `Error processing TRX transaction ${tx.txID}:`,
+                            error
+                        );
+                    }
                 }
             }
+        } catch (error) {
+            console.error("Error checking TRX transactions:", error);
         }
     }
 
     private async checkUSDTTransactions(payment: any) {
         try {
-            // Для USDT нужно проверять TRC20 транзакции
-            const contractAddress = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"; // USDT TRC20
+            // Получаем TRC20 транзакции для USDT
+            const response = await this.tronWeb.fullNode.request(
+                "v1/accounts/" + payment.cryptoAddress + "/transactions/trc20",
+                {
+                    limit: 20,
+                    contract_address: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", // USDT TRC20
+                    only_to: true,
+                    order_by: "block_timestamp,desc",
+                },
+                "get"
+            );
 
-            const transactions =
-                await this.tronWeb.trx.getTransactionsFromAddress(
-                    payment.cryptoAddress,
-                    10,
-                    0
-                );
+            if (!response.data || !Array.isArray(response.data)) {
+                return;
+            }
 
-            for (const tx of transactions) {
-                if (this.processedTxs.has(tx.txID)) continue;
+            for (const tx of response.data) {
+                if (this.processedTxs.has(tx.transaction_id)) continue;
 
-                if (
-                    await this.isValidUSDTTransaction(
-                        tx,
-                        payment,
-                        contractAddress
-                    )
-                ) {
+                // Проверяем, что это входящая USDT транзакция с правильной суммой
+                if (this.isValidUSDTTransaction(tx, payment)) {
                     try {
-                        await this.paymentService.handleCryptoPayment(tx.txID);
-                        this.processedTxs.add(tx.txID);
-                        console.log(`Processed USDT payment: ${tx.txID}`);
+                        await this.paymentService.handleCryptoPayment(
+                            tx.transaction_id
+                        );
+                        this.processedTxs.add(tx.transaction_id);
+                        console.log(
+                            `✅ Processed USDT payment: ${tx.transaction_id}`
+                        );
+                        break; // Выходим после первой найденной транзакции
                     } catch (error) {
                         console.error(
-                            `Error processing USDT transaction ${tx.txID}:`,
+                            `Error processing USDT transaction ${tx.transaction_id}:`,
                             error
                         );
                     }
@@ -122,65 +135,97 @@ export class CryptoMonitor {
 
     private isValidTRXTransaction(tx: any, payment: any): boolean {
         try {
+            // Проверяем базовые поля
             if (!tx.raw_data?.contract?.[0]) return false;
 
             const contract = tx.raw_data.contract[0];
+
+            // Проверяем тип контракта
             if (contract.type !== "TransferContract") return false;
 
+            // Получаем адрес получателя и сумму
             const toAddress = this.tronWeb.address.fromHex(
                 contract.parameter.value.to_address
             );
             const amount = contract.parameter.value.amount / 1000000; // Конвертируем в TRX
 
-            return (
-                toAddress === payment.cryptoAddress &&
-                Math.abs(amount - parseFloat(payment.expectedAmount)) < 0.01 && // Допуск на комиссию
-                new Date(tx.block_timestamp) >= new Date(payment.createdAt)
-            );
+            // Проверяем время транзакции (должна быть после создания платежа)
+            const txTimestamp = new Date(tx.block_timestamp);
+            const paymentCreated = new Date(payment.createdAt);
+
+            // Основные проверки
+            const isCorrectAddress = toAddress === payment.cryptoAddress;
+            const isCorrectAmount =
+                Math.abs(amount - parseFloat(payment.expectedAmount)) < 0.01;
+            const isAfterPaymentCreated = txTimestamp >= paymentCreated;
+
+            console.log(`TRX Transaction validation:`, {
+                txID: tx.txID,
+                toAddress,
+                expectedAddress: payment.cryptoAddress,
+                amount,
+                expectedAmount: parseFloat(payment.expectedAmount),
+                isCorrectAddress,
+                isCorrectAmount,
+                isAfterPaymentCreated,
+                txTimestamp: txTimestamp.toISOString(),
+                paymentCreated: paymentCreated.toISOString(),
+            });
+
+            return isCorrectAddress && isCorrectAmount && isAfterPaymentCreated;
         } catch (error) {
+            console.error("Error validating TRX transaction:", error);
             return false;
         }
     }
 
-    private isValidUSDTTransaction(
-        tx: any,
-        payment: any,
-        contractAddress: string
-    ): boolean {
+    private isValidUSDTTransaction(tx: any, payment: any): boolean {
         try {
-            if (!tx.raw_data?.contract?.[0]) return false;
+            // Для TRC20 транзакций структура немного другая
+            const toAddress = tx.to;
+            const fromAddress = tx.from;
 
-            const contract = tx.raw_data.contract[0];
-            if (contract.type !== "TriggerSmartContract") return false;
+            // Сумма уже в правильном формате (USDT)
+            const amount =
+                parseFloat(tx.value) / Math.pow(10, tx.token_info.decimals);
 
-            const contractAddr = this.tronWeb.address.fromHex(
-                contract.parameter.value.contract_address
-            );
+            // Проверяем время транзакции
+            const txTimestamp = new Date(tx.block_timestamp);
+            const paymentCreated = new Date(payment.createdAt);
 
-            if (contractAddr !== contractAddress) return false;
+            // Проверяем статус транзакции
+            const isSuccess = tx.type === "Transfer" && tx.result === "SUCCESS";
 
-            // Декодируем данные транзакции для получения суммы и получателя
-            const data = contract.parameter.value.data;
+            // Основные проверки
+            const isCorrectAddress = toAddress === payment.cryptoAddress;
+            const isCorrectAmount =
+                Math.abs(amount - parseFloat(payment.expectedAmount)) < 0.01;
+            const isAfterPaymentCreated = txTimestamp >= paymentCreated;
 
-            // Первые 8 символов - это селектор метода transfer (a9059cbb)
-            if (!data.startsWith("a9059cbb")) return false;
-
-            // Следующие 64 символа - адрес получателя
-            const toAddressHex = data.slice(8, 72);
-            const toAddress = this.tronWeb.address.fromHex(
-                "41" + toAddressHex.slice(24)
-            );
-
-            // Следующие 64 символа - сумма в wei (1 USDT = 1000000 wei для TRC20)
-            const amountHex = data.slice(72, 136);
-            const amount = parseInt(amountHex, 16) / 1000000; // Конвертируем в USDT
+            console.log(`USDT Transaction validation:`, {
+                txID: tx.transaction_id,
+                toAddress,
+                fromAddress,
+                expectedAddress: payment.cryptoAddress,
+                amount,
+                expectedAmount: parseFloat(payment.expectedAmount),
+                decimals: tx.token_info.decimals,
+                isCorrectAddress,
+                isCorrectAmount,
+                isAfterPaymentCreated,
+                isSuccess,
+                txTimestamp: txTimestamp.toISOString(),
+                paymentCreated: paymentCreated.toISOString(),
+            });
 
             return (
-                toAddress === payment.cryptoAddress &&
-                Math.abs(amount - parseFloat(payment.expectedAmount)) < 0.01 &&
-                new Date(tx.block_timestamp) >= new Date(payment.createdAt)
+                isCorrectAddress &&
+                isCorrectAmount &&
+                isAfterPaymentCreated &&
+                isSuccess
             );
         } catch (error) {
+            console.error("Error validating USDT transaction:", error);
             return false;
         }
     }
@@ -189,6 +234,7 @@ export class CryptoMonitor {
     clearProcessedCache() {
         if (this.processedTxs.size > 1000) {
             this.processedTxs.clear();
+            console.log("🧹 Cleared processed transactions cache");
         }
     }
 }

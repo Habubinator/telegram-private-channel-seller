@@ -10,11 +10,18 @@ import TelegramBot from "node-telegram-bot-api";
 import TronWeb from "tronweb";
 
 export class PaymentService {
+    private paymentHandlers: any; // Ссылка на PaymentHandlers
+
     constructor(
         private prisma: PrismaClient,
         private bot: TelegramBot,
         private tronWeb: TronWeb
     ) {}
+
+    // Метод для установки ссылки на PaymentHandlers
+    setPaymentHandlers(paymentHandlers: any) {
+        this.paymentHandlers = paymentHandlers;
+    }
 
     // Генерация уникального payload для избежания коллизий
     private generateUniquePayload(): string {
@@ -210,6 +217,13 @@ export class PaymentService {
 
             await this.createSubscription(tx, payment);
         });
+
+        // Уведомляем пользователя о успешном крипто-платеже
+        if (this.paymentHandlers) {
+            await this.paymentHandlers.handleCryptoPaymentSuccess(
+                payment.userId
+            );
+        }
 
         return payment;
     }

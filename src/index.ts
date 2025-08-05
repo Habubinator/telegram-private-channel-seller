@@ -30,11 +30,16 @@ class SubscriptionBot {
             this.bot,
             this.tronWeb
         );
+
         this.paymentHandlers = new PaymentHandlers(
             this.bot,
             this.paymentService,
             this.prisma
         );
+
+        // Устанавливаем связь между сервисами
+        this.paymentService.setPaymentHandlers(this.paymentHandlers);
+
         this.cryptoMonitor = new CryptoMonitor(
             this.prisma,
             this.tronWeb,
@@ -65,7 +70,7 @@ class SubscriptionBot {
         });
 
         // Проверка истекших подписок каждый час
-        cron.schedule("0 * * * *", async () => {
+        cron.schedule("/5 * * * *", async () => {
             try {
                 await this.removeExpiredSubscriptions();
             } catch (error) {
@@ -85,24 +90,24 @@ class SubscriptionBot {
 
         for (const subscription of expiredSubscriptions) {
             try {
-                // Удаляем пользователя из канала
-                await this.bot.banChatMember(
-                    process.env.CHANNEL_ID!,
-                    Number(subscription.user.telegramId)
-                );
-
-                // Деактивируем подписку
+                // Деактивируем подписку (пользователь будет автоматически отклонен при следующей попытке входа)
                 await this.prisma.subscription.update({
                     where: { id: subscription.id },
                     data: { isActive: false },
                 });
 
+                // Опционально: уведомляем пользователя об истечении подписки
+                await this.bot.sendMessage(
+                    Number(subscription.user.telegramId),
+                    "⏰ Ваша подписка истекла. Для продления доступа к каналу оформите новую подписку командой /start"
+                );
+
                 console.log(
-                    `Removed expired subscription for user ${subscription.user.telegramId}`
+                    `Deactivated expired subscription for user ${subscription.user.telegramId}`
                 );
             } catch (error) {
                 console.error(
-                    `Error removing user ${subscription.user.telegramId}:`,
+                    `Error processing expired subscription for user ${subscription.user.telegramId}:`,
                     error
                 );
             }

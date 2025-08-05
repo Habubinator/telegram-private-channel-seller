@@ -19,10 +19,105 @@ export class PaymentHandlers {
             },
         ]);
 
+        // Обработка запроса на вступление в группу/канал
+        this.bot.on("chat_join_request", async (chatJoinRequest) => {
+            try {
+                const userId = chatJoinRequest.from.id;
+                const chatId = chatJoinRequest.chat.id;
+
+                console.log(
+                    `Join request from user ${userId} to chat ${chatId}`
+                );
+
+                // Проверяем, есть ли у пользователя активная подписка
+                const user = await this.prisma.user.findUnique({
+                    where: { telegramId: BigInt(userId) },
+                    include: {
+                        subscriptions: {
+                            where: {
+                                channelId: chatId.toString(),
+                                isActive: true,
+                                endDate: { gte: new Date() },
+                            },
+                        },
+                    },
+                });
+
+                if (user && user.subscriptions.length > 0) {
+                    // У пользователя есть активная подписка - одобряем запрос
+                    await this.bot.approveChatJoinRequest(chatId, userId);
+
+                    // Отправляем уведомление пользователю
+                    await this.bot.sendMessage(
+                        userId,
+                        "✅ Добро пожаловать! Ваша подписка активна, доступ к каналу предоставлен."
+                    );
+
+                    console.log(
+                        `Approved join request for user ${userId} with active subscription`
+                    );
+                } else {
+                    // У пользователя нет активной подписки - отклоняем и предлагаем оплатить
+                    await this.bot.declineChatJoinRequest(chatId, userId);
+
+                    // Создаем или обновляем пользователя
+                    await this.getOrCreateUser(chatJoinRequest.from);
+
+                    // Предлагаем выбрать тариф
+                    const keyboard = {
+                        inline_keyboard: [
+                            [
+                                {
+                                    text: "📅 На сутки",
+                                    callback_data: "plan_DAY",
+                                },
+                            ],
+                            [
+                                {
+                                    text: "📅 На неделю",
+                                    callback_data: "plan_WEEK",
+                                },
+                            ],
+                            [
+                                {
+                                    text: "📅 На месяц",
+                                    callback_data: "plan_MONTH",
+                                },
+                            ],
+                        ],
+                    };
+
+                    await this.bot.sendMessage(
+                        userId,
+                        "❌ Для доступа к каналу необходима подписка.\n\nВыберите тариф:",
+                        { reply_markup: keyboard }
+                    );
+
+                    console.log(
+                        `Declined join request for user ${userId} - no active subscription`
+                    );
+                }
+            } catch (error) {
+                console.error("Error handling chat join request:", error);
+
+                // В случае ошибки отклоняем запрос
+                try {
+                    await this.bot.declineChatJoinRequest(
+                        chatJoinRequest.chat.id,
+                        chatJoinRequest.from.id
+                    );
+                } catch (declineError) {
+                    console.error(
+                        "Error declining join request:",
+                        declineError
+                    );
+                }
+            }
+        });
+
         // Обработка pre_checkout_query (звезды)
         this.bot.on("pre_checkout_query", async (query) => {
             try {
-                // Проверяем валидность платежа
                 const payment = await this.prisma.payment.findUnique({
                     where: { invoicePayload: query.invoice_payload },
                 });
@@ -53,13 +148,25 @@ export class PaymentHandlers {
                     payment.telegram_payment_charge_id
                 );
 
+                // Генерируем одноразовую ссылку-приглашение
+                const inviteLink = await this.createInviteLink();
+
+                const keyboard = {
+                    inline_keyboard: [
+                        [
+                            {
+                                text: "🔗 Войти в канал",
+                                url: inviteLink,
+                            },
+                        ],
+                    ],
+                };
+
                 await this.bot.sendMessage(
                     msg.chat.id,
-                    "✅ Платеж успешно обработан! Вы получили доступ к каналу."
+                    "✅ Платеж успешно обработан! Вы получили доступ к каналу.",
+                    { reply_markup: keyboard }
                 );
-
-                // Добавляем пользователя в канал
-                await this.addUserToChannel(msg.from!.id);
             } catch (error) {
                 console.error("Payment processing error:", error);
                 await this.bot.sendMessage(
@@ -224,11 +331,58 @@ export class PaymentHandlers {
         return user.id;
     }
 
-    private async addUserToChannel(telegramId: number) {
+    private async createInviteLink(): Promise<string> {
         try {
-            await this.bot.unbanChatMember(process.env.CHANNEL_ID!, telegramId);
+            // Создаем одноразовую ссылку-приглашение
+            const inviteLink = await this.bot.createChatInviteLink(
+                process.env.CHANNEL_ID!,
+                {
+                    name: `Invite_${Date.now()}`,
+                    expire_date: Math.floor(Date.now() / 1000) + 60 * 100,
+                    member_limit: 1, // Только для одного пользователя
+                    creates_join_request: false, // Прямое добавление без запроса
+                }
+            );
+
+            return inviteLink.invite_link;
         } catch (error) {
-            console.error("Error adding user to channel:", error);
+            console.error("Error creating invite link:", error);
+        }
+    }
+
+    // Метод для обработки успешных крипто-платежей
+    async handleCryptoPaymentSuccess(userId: string) {
+        try {
+            const user = await this.prisma.user.findUnique({
+                where: { id: userId },
+            });
+
+            if (!user) {
+                console.error(`User not found: ${userId}`);
+                return;
+            }
+
+            // Генерируем одноразовую ссылку-приглашение
+            const inviteLink = await this.createInviteLink();
+
+            const keyboard = {
+                inline_keyboard: [
+                    [
+                        {
+                            text: "🔗 Войти в канал",
+                            url: inviteLink,
+                        },
+                    ],
+                ],
+            };
+
+            await this.bot.sendMessage(
+                Number(user.telegramId),
+                "✅ Платеж успешно обработан! Вы получили доступ к каналу.",
+                { reply_markup: keyboard }
+            );
+        } catch (error) {
+            console.error("Error handling crypto payment success:", error);
         }
     }
 

@@ -1,7 +1,8 @@
-// services/CryptoMonitor.ts
 import { PrismaClient, PaymentStatus, PaymentType } from "@prisma/client";
 import TronWeb from "tronweb";
 import { PaymentService } from "./PaymentService";
+
+// TODO - хуйня не работает
 
 export class CryptoMonitor {
     private processedTxs = new Set<string>();

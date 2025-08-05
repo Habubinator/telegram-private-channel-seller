@@ -69,8 +69,8 @@ class SubscriptionBot {
             }
         });
 
-        // Проверка истекших подписок каждый час
-        cron.schedule("/5 * * * *", async () => {
+        // Проверка истекших подписок каждые 5 минут
+        cron.schedule("*/5 * * * *", async () => {
             try {
                 await this.removeExpiredSubscriptions();
             } catch (error) {
@@ -95,6 +95,11 @@ class SubscriptionBot {
                     where: { id: subscription.id },
                     data: { isActive: false },
                 });
+
+                await this.bot.banChatMember(
+                    process.env.CHANNEL_ID,
+                    subscription.user.telegramId as any
+                );
 
                 // Опционально: уведомляем пользователя об истечении подписки
                 await this.bot.sendMessage(

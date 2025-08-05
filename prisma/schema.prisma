@@ -1,0 +1,94 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String   @id @default(cuid())
+  telegramId  BigInt   @unique
+  username    String?
+  firstName   String?
+  lastName    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  payments    Payment[]
+  subscriptions Subscription[]
+  
+  @@map("users")
+}
+
+model Subscription {
+  id          String   @id @default(cuid())
+  userId      String
+  channelId   String
+  planType    PlanType
+  startDate   DateTime
+  endDate     DateTime
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  
+  user        User     @relation(fields: [userId], references: [id])
+  payment     Payment? @relation(fields: [paymentId], references: [id])
+  paymentId   String?  @unique
+  
+  @@map("subscriptions")
+}
+
+model Payment {
+  id              String        @id @default(cuid())
+  userId          String
+  amount          Decimal
+  currency        String
+  planType        PlanType
+  paymentType     PaymentType
+  status          PaymentStatus @default(PENDING)
+  
+  // Для звезд Telegram
+  invoicePayload  String?       @unique
+  telegramPaymentChargeId String? @unique
+  
+  // Для криптоплатежей
+  cryptoAddress   String?
+  cryptoTxHash    String?       @unique
+  expectedAmount  Decimal?
+  
+  // Системные поля
+  expiresAt       DateTime
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  user            User          @relation(fields: [userId], references: [id])
+  subscription    Subscription?
+  
+  @@map("payments")
+}
+
+enum PlanType {
+  DAY
+  WEEK
+  MONTH
+}
+
+enum PaymentType {
+  TELEGRAM_STARS
+  CRYPTO_TRX
+  CRYPTO_USDT
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  EXPIRED
+  FAILED
+}

@@ -245,10 +245,10 @@ export class PaymentService {
         });
 
         // TODO TEST
-        await this.refundStarPayment(
-            `${payment.user.telegramId}`,
-            telegramPaymentChargeId
-        );
+        // await this.refundStarPayment(
+        //     `${payment.user.telegramId}`,
+        //     telegramPaymentChargeId
+        // );
         return payment;
     }
 
@@ -374,18 +374,18 @@ export class PaymentService {
     }
 
     getPlanPrices() {
-        const prices = {
-            [PlanType.DAY]: { stars: 1, usdt: 21 },
-            [PlanType.WEEK]: { stars: 1, usdt: 30 },
-            [PlanType.MONTH]: { stars: 1, usdt: 61 },
-        };
+        // const prices = {
+        //     [PlanType.DAY]: { stars: 1, usdt: 21 },
+        //     [PlanType.WEEK]: { stars: 1, usdt: 30 },
+        //     [PlanType.MONTH]: { stars: 1, usdt: 61 },
+        // };
 
         // TODO Продакшн цены:
-        // const prices = {
-        //     [PlanType.DAY]: { stars: 399, usdt: 21 },
-        //     [PlanType.WEEK]: { stars: 599, usdt: 30 },
-        //     [PlanType.MONTH]: { stars: 2500, usdt: 61 },
-        // };
+        const prices = {
+            [PlanType.DAY]: { stars: 399, usdt: 21 },
+            [PlanType.WEEK]: { stars: 599, usdt: 30 },
+            [PlanType.MONTH]: { stars: 2500, usdt: 61 },
+        };
 
         return prices;
     }

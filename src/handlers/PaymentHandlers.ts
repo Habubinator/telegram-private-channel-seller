@@ -23,7 +23,7 @@ export class PaymentHandlers {
             },
         ]);
 
-        this.bot.onText(/^(📋\s*)?Pricing$/i, async (msg) => {
+        this.bot.onText(/^(📋\s*)?Price$/i, async (msg) => {
             const keyboard = {
                 inline_keyboard: [
                     [{ text: "📅 For a day", callback_data: "plan_DAY" }],
@@ -347,7 +347,7 @@ export class PaymentHandlers {
                     reply_markup: {
                         keyboard: [
                             [
-                                { text: "📋 Pricing" },
+                                { text: "📋 Price" },
                                 { text: "👤 My Subscription" },
                             ],
                         ],

@@ -250,15 +250,15 @@ export class PaymentService {
 
         // TODO TEST
         await this.refundStarPayment(
-            payment.user.telegramId,
+            `${payment.user.telegramId}`,
             telegramPaymentChargeId
         );
         return payment;
     }
 
-    // Рефанд звездами (оставляем как есть)
+    // Рефанд звезд
     async refundStarPayment(
-        userId: string | bigint | number,
+        userId: string,
         telegramPaymentChargeId: string
     ): Promise<boolean> {
         try {
@@ -378,18 +378,18 @@ export class PaymentService {
     }
 
     private getPlanPrices() {
-        // const prices = {
-        //     [PlanType.DAY]: { stars: 1, usdt: 13 },
-        //     [PlanType.WEEK]: { stars: 1, usdt: 13 },
-        //     [PlanType.MONTH]: { stars: 1, usdt: 13 },
-        // };
-
-        // Продакшн цены:
         const prices = {
-            [PlanType.DAY]: { stars: 399, usdt: 21 },
-            [PlanType.WEEK]: { stars: 599, usdt: 30 },
-            [PlanType.MONTH]: { stars: 2500, usdt: 61 },
+            [PlanType.DAY]: { stars: 1, usdt: 21 },
+            [PlanType.WEEK]: { stars: 1, usdt: 30 },
+            [PlanType.MONTH]: { stars: 1, usdt: 61 },
         };
+
+        // TODO Продакшн цены:
+        // const prices = {
+        //     [PlanType.DAY]: { stars: 399, usdt: 21 },
+        //     [PlanType.WEEK]: { stars: 599, usdt: 30 },
+        //     [PlanType.MONTH]: { stars: 2500, usdt: 61 },
+        // };
 
         return prices;
     }
@@ -413,9 +413,9 @@ export class PaymentService {
 
     private getPlanName(planType: PlanType): string {
         const names = {
-            [PlanType.DAY]: "сутки",
-            [PlanType.WEEK]: "неделю",
-            [PlanType.MONTH]: "месяц",
+            [PlanType.DAY]: "day",
+            [PlanType.WEEK]: "week",
+            [PlanType.MONTH]: "month",
         };
         return names[planType];
     }

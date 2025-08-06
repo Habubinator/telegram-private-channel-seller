@@ -189,10 +189,17 @@ export class PaymentHandlers {
                     [{ text: "📅 For a month", callback_data: "plan_MONTH" }],
                 ],
             };
-
             await this.bot.sendMessage(
                 msg.chat.id,
-                "Select a subscription plan:",
+                `❤️‍🔥With this bot, you can access my secret channel with hot content with my boyfriend. 
+❤️‍🔥Quick and confidential. 
+❤️‍🔥Photos, videos and interactive content that is actively updated. 
+❤️‍🔥You can see the entire archive, and I never delete old content.
+❤️‍🔥Click start to join👇🏼`
+            );
+            await this.bot.sendMessage(
+                msg.chat.id,
+                `Select a subscription plan:`,
                 { reply_markup: keyboard }
             );
         });

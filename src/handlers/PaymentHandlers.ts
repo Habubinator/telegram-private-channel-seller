@@ -15,11 +15,11 @@ export class PaymentHandlers {
         this.bot.setMyCommands([
             {
                 command: "start",
-                description: "Подписаться на канал",
+                description: "Subscribe to the channel",
             },
             {
                 command: "check",
-                description: "Проверить статус платежа",
+                description: "Check payment status",
             },
         ]);
 
@@ -54,7 +54,7 @@ export class PaymentHandlers {
                     // Отправляем уведомление пользователю
                     await this.bot.sendMessage(
                         userId,
-                        "✅ Добро пожаловать! Ваша подписка активна, доступ к каналу предоставлен."
+                        "✅ Welcome! Your subscription is active, access to the channel has been granted."
                     );
 
                     console.log(
@@ -72,19 +72,19 @@ export class PaymentHandlers {
                         inline_keyboard: [
                             [
                                 {
-                                    text: "📅 На сутки",
+                                    text: "📅 For a day",
                                     callback_data: "plan_DAY",
                                 },
                             ],
                             [
                                 {
-                                    text: "📅 На неделю",
+                                    text: "📅 For a week",
                                     callback_data: "plan_WEEK",
                                 },
                             ],
                             [
                                 {
-                                    text: "📅 На месяц",
+                                    text: "📅 For a month",
                                     callback_data: "plan_MONTH",
                                 },
                             ],
@@ -93,7 +93,7 @@ export class PaymentHandlers {
 
                     await this.bot.sendMessage(
                         userId,
-                        "❌ Для доступа к каналу необходима подписка.\n\nВыберите тариф:",
+                        "❌ A subscription is required to access the channel.\n\nSelect a plan:",
                         { reply_markup: keyboard }
                     );
 
@@ -128,7 +128,7 @@ export class PaymentHandlers {
 
                 if (!payment || payment.expiresAt < new Date()) {
                     await this.bot.answerPreCheckoutQuery(query.id, false, {
-                        error_message: "Платеж истек или не найден",
+                        error_message: "Payment expired or not found",
                     });
                     return;
                 }
@@ -137,7 +137,7 @@ export class PaymentHandlers {
             } catch (error) {
                 console.error("Pre-checkout error:", error);
                 await this.bot.answerPreCheckoutQuery(query.id, false, {
-                    error_message: "Ошибка обработки платежа",
+                    error_message: "Payment error.",
                 });
             }
         });
@@ -159,7 +159,7 @@ export class PaymentHandlers {
                     inline_keyboard: [
                         [
                             {
-                                text: "🔗 Войти в канал",
+                                text: "🔗 Join Channel",
                                 url: inviteLink,
                             },
                         ],
@@ -168,14 +168,14 @@ export class PaymentHandlers {
 
                 await this.bot.sendMessage(
                     msg.chat.id,
-                    "✅ Платеж успешно обработан! Вы получили доступ к каналу.",
+                    "✅ Payment successfully processed! You have gained access to the channel.",
                     { reply_markup: keyboard }
                 );
             } catch (error) {
                 console.error("Payment processing error:", error);
                 await this.bot.sendMessage(
                     msg.chat.id,
-                    "❌ Ошибка при обработке платежа. Обратитесь в поддержку."
+                    "❌ Error processing payment. Please contact owner for help."
                 );
             }
         });
@@ -184,15 +184,15 @@ export class PaymentHandlers {
         this.bot.onText(/\/start/, async (msg) => {
             const keyboard = {
                 inline_keyboard: [
-                    [{ text: "📅 На сутки", callback_data: "plan_DAY" }],
-                    [{ text: "📅 На неделю", callback_data: "plan_WEEK" }],
-                    [{ text: "📅 На месяц", callback_data: "plan_MONTH" }],
+                    [{ text: "📅 For a day", callback_data: "plan_DAY" }],
+                    [{ text: "📅 For a week", callback_data: "plan_WEEK" }],
+                    [{ text: "📅 For a month", callback_data: "plan_MONTH" }],
                 ],
             };
 
             await this.bot.sendMessage(
                 msg.chat.id,
-                "Выберите тариф подписки:",
+                "Select a subscription plan:",
                 { reply_markup: keyboard }
             );
         });
@@ -217,14 +217,14 @@ export class PaymentHandlers {
                 if (!pendingPayment || !pendingPayment.cryptoTxHash) {
                     await this.bot.sendMessage(
                         msg.chat.id,
-                        "❌ У вас нет ожидающих крипто-платежей для проверки."
+                        "❌ You have no pending crypto payments to verify."
                     );
                     return;
                 }
 
                 await this.bot.sendMessage(
                     msg.chat.id,
-                    "🔄 Проверяю статус платежа..."
+                    "🔄 Checking payment status..."
                 );
 
                 const result =
@@ -242,7 +242,7 @@ export class PaymentHandlers {
                         inline_keyboard: [
                             [
                                 {
-                                    text: "🔗 Войти в канал",
+                                    text: "🔗 Join channel",
                                     url: inviteLink,
                                 },
                             ],
@@ -251,7 +251,7 @@ export class PaymentHandlers {
 
                     await this.bot.sendMessage(
                         msg.chat.id,
-                        "✅ Платеж подтвержден! Подписка активирована.",
+                        "✅ Payment confirmed! Subscription activated.",
                         { reply_markup: keyboard }
                     );
                 } else if (
@@ -261,7 +261,7 @@ export class PaymentHandlers {
                 ) {
                     await this.bot.sendMessage(
                         msg.chat.id,
-                        "❌ Платеж не прошел. Попробуйте создать новый платеж."
+                        "❌ Payment failed. Try creating a new payment."
                     );
                 } else {
                     // Платеж еще обрабатывается
@@ -270,14 +270,14 @@ export class PaymentHandlers {
                     );
                     await this.bot.sendMessage(
                         msg.chat.id,
-                        `⏳ Статус платежа: ${statusText}\n\nПовторите команду /check через несколько минут.`
+                        `⏳ Payment status: ${statusText}\n\nPlease repeat the /check command in a few minutes.`
                     );
                 }
             } catch (error) {
                 console.error("Error checking payment:", error);
                 await this.bot.sendMessage(
                     msg.chat.id,
-                    "❌ Ошибка при проверке платежа. Попробуйте позже."
+                    "❌ Error checking payment. Please try again later."
                 );
             }
         });
@@ -288,13 +288,13 @@ export class PaymentHandlers {
 
             const keyboard = {
                 inline_keyboard: [
-                    [{ text: "📅 На сутки", callback_data: "plan_DAY" }],
-                    [{ text: "📅 На неделю", callback_data: "plan_WEEK" }],
-                    [{ text: "📅 На месяц", callback_data: "plan_MONTH" }],
+                    [{ text: "📅 For a day", callback_data: "plan_DAY" }],
+                    [{ text: "📅 For a week", callback_data: "plan_WEEK" }],
+                    [{ text: "📅 For a month", callback_data: "plan_MONTH" }],
                 ],
             };
 
-            await this.bot.editMessageText(`Выберите тариф подписки:`, {
+            await this.bot.editMessageText(`Select a subscription plan:`, {
                 chat_id: query.message!.chat.id,
                 message_id: query.message!.message_id,
                 reply_markup: keyboard,
@@ -312,24 +312,24 @@ export class PaymentHandlers {
                 inline_keyboard: [
                     [
                         {
-                            text: "⭐ Оплатить звездами",
+                            text: "⭐ Pay with TGStars (no comission)",
                             callback_data: `pay_stars_${planType}`,
                         },
                     ],
                     [
                         {
-                            text: "💵 Оплатить USDT",
+                            text: "💵 Pay with USDT",
                             callback_data: `pay_usdt_${planType}`,
                         },
                     ],
-                    [{ text: "← Назад", callback_data: "back_to_plans" }],
+                    [{ text: "← Back", callback_data: "back_to_plans" }],
                 ],
             };
 
             await this.bot.editMessageText(
-                `Выбран тариф: ${this.getPlanName(
+                `Selected tariff: ${this.getPlanName(
                     planType
-                )}\nВыберите способ оплаты:`,
+                )}\nSelect a payment method:`,
                 {
                     chat_id: query.message!.chat.id,
                     message_id: query.message!.message_id,
@@ -353,7 +353,7 @@ export class PaymentHandlers {
                     );
 
                     await this.bot.answerCallbackQuery(query.id, {
-                        text: "Инвойс отправлен! Проверьте сообщения.",
+                        text: "The invoice has been sent! Please check your messages.",
                     });
                 } else if (paymentType === "usdt") {
                     const result =
@@ -366,13 +366,13 @@ export class PaymentHandlers {
                         inline_keyboard: [
                             [
                                 {
-                                    text: "🔄 Проверить платеж",
+                                    text: "🔄 Check payment",
                                     callback_data: `check_payment_${result.paymentId}`,
                                 },
                             ],
                             [
                                 {
-                                    text: "ℹ️ Инструкция по оплате",
+                                    text: "ℹ️ Payment instructions",
                                     callback_data: `payment_info_${result.paymentId}`,
                                 },
                             ],
@@ -380,16 +380,17 @@ export class PaymentHandlers {
                     };
 
                     const message = `
-💳 **Крипто-платеж USDT TRC20**
+💳 **USDT TRC20 crypto payment**
 
-💰 **Сумма:** \`${result.amount}\` USDT
-📍 **Адрес:** \`${result.address}\`
-🆔 **ID платежа:** \`${result.paymentId}\`
+💰 **Amount:** \`${result.amount}\` USDT
+📍 **Address:** \`${result.address}\`
+🆔 **Payment ID:** \`${result.paymentId}\`
 
-⏰ **Время на оплату:** 60 минут
-⚠️ **Важно:** Отправьте точную сумму на указанный адрес
+⏰ **Payment time:** 60 minutes
+⚠️ **Important:** Send the exact amount to the specified address
+⚠️ **Important:** Transfer fees are included in the price
 
-После отправки используйте команду /check или нажмите кнопку "Проверить платеж"
+After sending, use the /check command or click the “Check payment” button
                     `;
 
                     await this.bot.sendMessage(
@@ -402,13 +403,13 @@ export class PaymentHandlers {
                     );
 
                     await this.bot.answerCallbackQuery(query.id, {
-                        text: "Реквизиты для оплаты отправлены!",
+                        text: "Payment details have been sent!",
                     });
                 }
             } catch (error) {
                 console.error("Payment creation error:", error);
                 await this.bot.answerCallbackQuery(query.id, {
-                    text: "Ошибка создания платежа. Попробуйте позже.",
+                    text: "Error creating payment. Please try again later.",
                     show_alert: true,
                 });
             }
@@ -422,7 +423,7 @@ export class PaymentHandlers {
 
             try {
                 await this.bot.answerCallbackQuery(query.id, {
-                    text: "🔄 Проверяю платеж...",
+                    text: "🔄 Checking payment...",
                 });
 
                 const result =
@@ -440,7 +441,7 @@ export class PaymentHandlers {
                         inline_keyboard: [
                             [
                                 {
-                                    text: "🔗 Войти в канал",
+                                    text: "🔗 Join channel",
                                     url: inviteLink,
                                 },
                             ],
@@ -448,7 +449,7 @@ export class PaymentHandlers {
                     };
 
                     await this.bot.editMessageText(
-                        "✅ Платеж подтвержден! Подписка активирована.",
+                        "✅ Payment confirmed! Subscription activated.",
                         {
                             chat_id: query.message!.chat.id,
                             message_id: query.message!.message_id,
@@ -461,7 +462,7 @@ export class PaymentHandlers {
                     )
                 ) {
                     await this.bot.editMessageText(
-                        "❌ Платеж не прошел. Попробуйте создать новый платеж командой /start",
+                        "❌ Payment failed. Try creating a new payment with the command /start.",
                         {
                             chat_id: query.message!.chat.id,
                             message_id: query.message!.message_id,
@@ -477,7 +478,7 @@ export class PaymentHandlers {
                         inline_keyboard: [
                             [
                                 {
-                                    text: "🔄 Проверить еще раз",
+                                    text: "🔄 Check again",
                                     callback_data: `check_payment_${paymentId}`,
                                 },
                             ],
@@ -485,7 +486,7 @@ export class PaymentHandlers {
                     };
 
                     await this.bot.editMessageText(
-                        `⏳ Статус платежа: ${statusText}\n\nПопробуйте проверить через несколько минут.`,
+                        `⏳ Payment status: ${statusText}\n\nPlease try again in a few minutes.`,
                         {
                             chat_id: query.message!.chat.id,
                             message_id: query.message!.message_id,
@@ -496,7 +497,7 @@ export class PaymentHandlers {
             } catch (error) {
                 console.error("Error checking payment:", error);
                 await this.bot.answerCallbackQuery(query.id, {
-                    text: "❌ Ошибка при проверке платежа",
+                    text: "❌ Error checking payment",
                     show_alert: true,
                 });
             }
@@ -507,28 +508,24 @@ export class PaymentHandlers {
             if (!query.data?.startsWith("payment_info_")) return;
 
             const infoText = `
-📋 **Инструкция по оплате USDT TRC20:**
+📋 **Instructions for paying with USDT TRC20:**
 
-1️⃣ Откройте ваш крипто-кошелек
-2️⃣ Выберите отправку USDT в сети TRON (TRC20)
-3️⃣ Скопируйте адрес получателя из сообщения выше
-4️⃣ Введите точную сумму (очень важно!)
-5️⃣ Отправьте транзакцию
-6️⃣ Используйте команду /check для проверки
+1️⃣ Open your crypto wallet
+2️⃣ Select to send USDT on the TRON network (TRC20)
+3️⃣ Copy the recipient's address from the message above
+4️⃣ Enter the exact amount (very important!)
+5️⃣ Send the transaction
+6️⃣ Use the /check command or button to verify
 
-⚠️ **Важные моменты:**
-• Используйте только сеть TRON (TRC20)
-• Отправьте точную сумму
-• Комиссия сети оплачивается отдельно
-• Платеж действителен 60 минут
-
-❓ **Популярные кошельки с поддержкой TRC20:**
-• TronLink, Trust Wallet, Atomic Wallet
-• Биржи: Binance, Huobi, OKEx
+⚠️ **Important points:**
+• Use only the TRON (TRC20) network
+• Send the exact amount
+• Network fees (10.5 USD) are paid separately
+• The payment is valid for 60 minutes
             `;
 
             await this.bot.answerCallbackQuery(query.id, {
-                text: "Инструкция отправлена!",
+                text: "Instruction sent!",
             });
 
             await this.bot.sendMessage(query.message!.chat.id, infoText, {
@@ -597,7 +594,7 @@ export class PaymentHandlers {
                 inline_keyboard: [
                     [
                         {
-                            text: "🔗 Войти в канал",
+                            text: "🔗 Join channel",
                             url: inviteLink,
                         },
                     ],
@@ -606,7 +603,7 @@ export class PaymentHandlers {
 
             await this.bot.sendMessage(
                 Number(user.telegramId),
-                "✅ Платеж успешно обработан! Вы получили доступ к каналу.",
+                "✅ Your payment has been successfully processed! You now have access to the channel.",
                 { reply_markup: keyboard }
             );
         } catch (error) {
@@ -616,24 +613,24 @@ export class PaymentHandlers {
 
     private getPlanName(planType: PlanType): string {
         const names = {
-            [PlanType.DAY]: "сутки",
-            [PlanType.WEEK]: "неделю",
-            [PlanType.MONTH]: "месяц",
+            [PlanType.DAY]: "day",
+            [PlanType.WEEK]: "week",
+            [PlanType.MONTH]: "month",
         };
         return names[planType];
     }
 
     private getPaymentStatusText(status: string): string {
         const statusMap: { [key: string]: string } = {
-            waiting: "Ожидает оплаты",
-            confirming: "Подтверждается в блокчейне",
-            confirmed: "Подтверждено, обрабатывается",
-            sending: "Отправляется",
-            partially_paid: "Частично оплачено",
-            finished: "Завершено",
-            failed: "Неудачно",
-            refunded: "Возвращено",
-            expired: "Истекло",
+            waiting: "Waiting",
+            confirming: "Confirming",
+            confirmed: "Confirmed, proceeding",
+            sending: "Sending",
+            partially_paid: "Partially paid",
+            finished: "Finished",
+            failed: "Failed",
+            refunded: "Refunded",
+            expired: "Expired",
         };
 
         return statusMap[status] || status;

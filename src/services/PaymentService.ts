@@ -55,12 +55,12 @@ export class PaymentService {
         // Отправляем инвойс
         await this.bot.sendInvoice(
             telegramId,
-            `Подписка на ${this.getPlanName(planType)}`,
-            `Доступ к каналу на ${this.getPlanName(planType)}`,
+            `Subscription for ${this.getPlanName(planType)}`,
+            `Channel permission for ${this.getPlanName(planType)}`,
             payload,
             "",
             "XTR",
-            [{ label: "Подписка", amount: price }],
+            [{ label: "Subscription", amount: price }],
             {
                 start_parameter: `payment_${payment.id}`,
             }
@@ -81,7 +81,7 @@ export class PaymentService {
             try {
                 const minAmount =
                     await this.nowPayments.getMinimumPaymentAmount(
-                        "USD",
+                        "USDTTRC20",
                         "USDTTRC20"
                     );
                 console.log(`💰 Minimum payment amount: ${minAmount} USD`);
@@ -103,10 +103,12 @@ export class PaymentService {
 
             const nowPayment = await this.nowPayments.createPayment({
                 price_amount: usdAmount,
-                price_currency: "USD",
+                price_currency: "USDTTRC20",
                 pay_currency: "USDTTRC20", // Используем только USDTTRC20, так как он поддерживается
                 order_id: orderId,
-                order_description: `Подписка на ${this.getPlanName(planType)}`,
+                order_description: `Subscription for ${this.getPlanName(
+                    planType
+                )}`,
             });
 
             // Создаем запись о платеже в нашей БД
@@ -246,12 +248,17 @@ export class PaymentService {
             await this.createSubscription(tx, payment);
         });
 
+        // TODO TEST
+        await this.refundStarPayment(
+            payment.user.telegramId,
+            telegramPaymentChargeId
+        );
         return payment;
     }
 
     // Рефанд звездами (оставляем как есть)
     async refundStarPayment(
-        userId: string,
+        userId: string | bigint | number,
         telegramPaymentChargeId: string
     ): Promise<boolean> {
         try {
@@ -371,18 +378,18 @@ export class PaymentService {
     }
 
     private getPlanPrices() {
-        const prices = {
-            [PlanType.DAY]: { stars: 1, usdt: 12 },
-            [PlanType.WEEK]: { stars: 1, usdt: 19 },
-            [PlanType.MONTH]: { stars: 1, usdt: 50 },
-        };
+        // const prices = {
+        //     [PlanType.DAY]: { stars: 1, usdt: 13 },
+        //     [PlanType.WEEK]: { stars: 1, usdt: 13 },
+        //     [PlanType.MONTH]: { stars: 1, usdt: 13 },
+        // };
 
         // Продакшн цены:
-        // const prices = {
-        //     [PlanType.DAY]: { stars: 399, usdt: 10 },
-        //     [PlanType.WEEK]: { stars: 599, usdt: 19 },
-        //     [PlanType.MONTH]: { stars: 2500, usdt: 50 },
-        // };
+        const prices = {
+            [PlanType.DAY]: { stars: 399, usdt: 21 },
+            [PlanType.WEEK]: { stars: 599, usdt: 30 },
+            [PlanType.MONTH]: { stars: 2500, usdt: 61 },
+        };
 
         return prices;
     }

@@ -179,7 +179,7 @@ export class NOWPaymentsService {
      * Получение списка платежей
      */
     async getPayments(
-        limit: number = 10,
+        limit: number = 100,
         page: number = 0
     ): Promise<{ data: NOWPayment[] }> {
         try {

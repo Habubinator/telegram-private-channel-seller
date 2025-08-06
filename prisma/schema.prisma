@@ -58,10 +58,10 @@ model Payment {
   invoicePayload  String?       @unique
   telegramPaymentChargeId String? @unique
   
-  // Для криптоплатежей
-  cryptoAddress   String?
-  cryptoTxHash    String?       @unique
-  expectedAmount  Decimal?
+  // Для NOWPayments крипто-платежей
+  cryptoAddress   String?       // Адрес для оплаты от NOWPayments
+  cryptoTxHash    String?       @unique // payment_id от NOWPayments
+  expectedAmount  Decimal?      // Ожидаемая сумма в криптовалюте
   
   // Системные поля
   expiresAt       DateTime
@@ -82,7 +82,6 @@ enum PlanType {
 
 enum PaymentType {
   TELEGRAM_STARS
-  CRYPTO_TRX
   CRYPTO_USDT
 }
 

@@ -7,16 +7,17 @@ import {
 import axios from "axios";
 import { randomUUID } from "crypto";
 import TelegramBot from "node-telegram-bot-api";
-import TronWeb from "tronweb";
+import { NOWPaymentsService, NOWPayment } from "./NOWPaymentsService";
 
 export class PaymentService {
     private paymentHandlers: any; // Ссылка на PaymentHandlers
+    private nowPayments: NOWPaymentsService;
 
-    constructor(
-        private prisma: PrismaClient,
-        private bot: TelegramBot,
-        private tronWeb: TronWeb
-    ) {}
+    constructor(private prisma: PrismaClient, private bot: TelegramBot) {
+        this.nowPayments = new NOWPaymentsService(
+            process.env.NOWPAYMENTS_API_KEY!
+        );
+    }
 
     // Метод для установки ссылки на PaymentHandlers
     setPaymentHandlers(paymentHandlers: any) {
@@ -68,36 +69,152 @@ export class PaymentService {
         return payment;
     }
 
-    // Создание крипто-платежа
-    async createCryptoPayment(
-        userId: string,
-        planType: PlanType,
-        cryptoType: "TRX" | "USDT"
-    ) {
-        const prices = this.getPlanPrices();
-        const amount =
-            prices[planType][cryptoType.toLowerCase() as "trx" | "usdt"];
+    // Создание крипто-платежа через NOWPayments
+    async createCryptoPayment(userId: string, planType: PlanType) {
+        try {
+            const prices = this.getPlanPrices();
+            const usdAmount = prices[planType].usdt;
 
-        // Генерируем уникальный адрес или используем основной с memo
-        const paymentAddress = await this.generatePaymentAddress();
+            const orderId = `order_${Date.now()}_${randomUUID().slice(0, 8)}`;
 
-        const payment = await this.prisma.payment.create({
-            data: {
-                userId,
-                amount,
-                currency: cryptoType,
-                planType,
-                paymentType:
-                    cryptoType === "TRX"
-                        ? PaymentType.CRYPTO_TRX
-                        : PaymentType.CRYPTO_USDT,
-                cryptoAddress: paymentAddress,
-                expectedAmount: amount,
-                expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1 час
-            },
-        });
+            // Проверяем минимальную сумму заранее
+            try {
+                const minAmount =
+                    await this.nowPayments.getMinimumPaymentAmount(
+                        "USD",
+                        "USDTTRC20"
+                    );
+                console.log(`💰 Minimum payment amount: ${minAmount} USD`);
 
-        return { payment, address: paymentAddress };
+                if (usdAmount < minAmount) {
+                    throw new Error(
+                        `Payment amount ${usdAmount} USD is less than minimum ${minAmount} USD`
+                    );
+                }
+            } catch (minError) {
+                console.log(
+                    "⚠️ Could not check minimum amount, proceeding anyway:",
+                    minError.message
+                );
+            }
+
+            // Создаем платеж в NOWPayments
+            console.log(`🔄 Creating payment for ${usdAmount} USD`);
+
+            const nowPayment = await this.nowPayments.createPayment({
+                price_amount: usdAmount,
+                price_currency: "USD",
+                pay_currency: "USDTTRC20", // Используем только USDTTRC20, так как он поддерживается
+                order_id: orderId,
+                order_description: `Подписка на ${this.getPlanName(planType)}`,
+            });
+
+            // Создаем запись о платеже в нашей БД
+            const payment = await this.prisma.payment.create({
+                data: {
+                    userId,
+                    amount: nowPayment.pay_amount,
+                    currency: "USDTTRC20",
+                    planType,
+                    paymentType: PaymentType.CRYPTO_USDT,
+                    cryptoAddress: nowPayment.pay_address,
+                    expectedAmount: nowPayment.pay_amount,
+                    cryptoTxHash: nowPayment.payment_id, // Используем payment_id как идентификатор
+                    expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1 час
+                },
+            });
+
+            return {
+                payment,
+                nowPayment,
+                address: nowPayment.pay_address,
+                amount: nowPayment.pay_amount,
+                paymentId: nowPayment.payment_id,
+            };
+        } catch (error) {
+            console.error("Error creating NOWPayments payment:", error);
+            throw new Error("Failed to create crypto payment");
+        }
+    }
+
+    // Проверка статуса крипто-платежа
+    async checkCryptoPaymentStatus(paymentId: string): Promise<{
+        payment: any;
+        nowPayment: NOWPayment;
+        statusChanged: boolean;
+    }> {
+        try {
+            // Получаем наш платеж из БД
+            const payment = await this.prisma.payment.findUnique({
+                where: { cryptoTxHash: paymentId },
+                include: { user: true },
+            });
+
+            if (!payment) {
+                throw new Error("Payment not found");
+            }
+
+            // Получаем статус из NOWPayments
+            const nowPayment = await this.nowPayments.getPaymentStatus(
+                paymentId
+            );
+
+            let statusChanged = false;
+
+            // Проверяем, нужно ли обновить статус
+            if (
+                nowPayment.payment_status === "finished" &&
+                payment.status === PaymentStatus.PENDING
+            ) {
+                await this.prisma.$transaction(async (tx) => {
+                    // Обновляем платеж
+                    await tx.payment.update({
+                        where: { id: payment.id },
+                        data: {
+                            status: PaymentStatus.COMPLETED,
+                        },
+                    });
+
+                    // Создаем подписку
+                    await this.createSubscription(tx, payment);
+                });
+
+                // Уведомляем пользователя о успешном платеже
+                if (this.paymentHandlers) {
+                    await this.paymentHandlers.handleCryptoPaymentSuccess(
+                        payment.userId
+                    );
+                }
+
+                statusChanged = true;
+                console.log(`✅ Crypto payment completed: ${paymentId}`);
+            } else if (
+                ["failed", "refunded", "expired"].includes(
+                    nowPayment.payment_status
+                ) &&
+                payment.status === PaymentStatus.PENDING
+            ) {
+                await this.prisma.payment.update({
+                    where: { id: payment.id },
+                    data: {
+                        status: PaymentStatus.FAILED,
+                    },
+                });
+                statusChanged = true;
+                console.log(
+                    `❌ Crypto payment failed: ${paymentId} (${nowPayment.payment_status})`
+                );
+            }
+
+            return {
+                payment,
+                nowPayment,
+                statusChanged,
+            };
+        } catch (error) {
+            console.error(`Error checking payment status ${paymentId}:`, error);
+            throw error;
+        }
     }
 
     // Обработка успешного платежа звездами
@@ -129,14 +246,10 @@ export class PaymentService {
             await this.createSubscription(tx, payment);
         });
 
-        await this.refundStarPayment(
-            `${payment.user.telegramId}`,
-            telegramPaymentChargeId
-        );
-
         return payment;
     }
 
+    // Рефанд звездами (оставляем как есть)
     async refundStarPayment(
         userId: string,
         telegramPaymentChargeId: string
@@ -166,191 +279,22 @@ export class PaymentService {
         }
     }
 
-    // Обработка крипто-платежа
-    async handleCryptoPayment(txHash: string) {
-        try {
-            // Сначала ищем существующий платеж с этим хэшем
-            const existingPayment = await this.prisma.payment.findUnique({
-                where: { cryptoTxHash: txHash },
-            });
-
-            if (existingPayment) {
-                console.log(`Transaction ${txHash} already processed`);
-                return existingPayment;
-            }
-
-            // Получаем информацию о транзакции
-            const txInfo = await this.tronWeb.trx.getTransaction(txHash);
-
-            if (
-                !txInfo ||
-                !txInfo.ret ||
-                txInfo.ret[0].contractRet !== "SUCCESS"
-            ) {
-                throw new Error(`Invalid or failed transaction: ${txHash}`);
-            }
-
-            let payment: any = null;
-
-            // Проверяем тип транзакции
-            const contract = txInfo.raw_data.contract[0];
-
-            if (contract.type === "TransferContract") {
-                // TRX транзакция
-                payment = await this.handleTRXTransaction(txInfo, txHash);
-            } else if (contract.type === "TriggerSmartContract") {
-                // TRC20 транзакция (USDT)
-                payment = await this.handleUSDTTransaction(txInfo, txHash);
-            } else {
-                throw new Error(
-                    `Unsupported transaction type: ${contract.type}`
-                );
-            }
-
-            if (!payment) {
-                throw new Error("No matching payment found for transaction");
-            }
-
-            // Обновляем платеж и создаем подписку атомарно
-            await this.prisma.$transaction(async (tx) => {
-                await tx.payment.update({
-                    where: { id: payment.id },
-                    data: {
-                        status: PaymentStatus.COMPLETED,
-                        cryptoTxHash: txHash,
-                    },
-                });
-
-                await this.createSubscription(tx, payment);
-            });
-
-            // Уведомляем пользователя о успешном крипто-платеже
-            if (this.paymentHandlers) {
-                await this.paymentHandlers.handleCryptoPaymentSuccess(
-                    payment.userId
-                );
-            }
-
-            console.log(
-                `✅ Successfully processed crypto payment: ${payment.id} (${txHash})`
-            );
-            return payment;
-        } catch (error) {
-            console.error(`Error handling crypto payment ${txHash}:`, error);
-            throw error;
-        }
-    }
-
-    private async handleTRXTransaction(txInfo: any, txHash: string) {
-        const contract = txInfo.raw_data.contract[0];
-        const toAddress = this.tronWeb.address.fromHex(
-            contract.parameter.value.to_address
-        );
-        const amount = contract.parameter.value.amount / 1000000; // Конвертируем в TRX
-
-        // Ищем соответствующий платеж
-        const payment = await this.prisma.payment.findFirst({
-            where: {
-                cryptoAddress: toAddress,
-                status: PaymentStatus.PENDING,
-                paymentType: PaymentType.CRYPTO_TRX,
-                expiresAt: { gte: new Date() },
-                // Проверяем сумму с небольшим допуском
-                expectedAmount: {
-                    gte: amount - 0.01,
-                    lte: amount + 0.01,
-                },
-            },
-            include: { user: true },
-        });
-
-        if (!payment) {
-            console.log(
-                `No matching TRX payment found for transaction ${txHash}:`,
-                {
-                    toAddress,
-                    amount,
-                    timestamp: new Date(txInfo.block_timestamp),
-                }
-            );
-        }
-
-        return payment;
-    }
-
-    private async handleUSDTTransaction(txInfo: any, txHash: string) {
-        const contract = txInfo.raw_data.contract[0];
-
-        // Проверяем, что это USDT контракт
-        const contractAddress = this.tronWeb.address.fromHex(
-            contract.parameter.value.contract_address
-        );
-        const usdtContractAddress = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
-
-        if (contractAddress !== usdtContractAddress) {
-            throw new Error(`Not a USDT transaction: ${contractAddress}`);
-        }
-
-        // Декодируем данные транзакции
-        const data = contract.parameter.value.data;
-
-        // Проверяем селектор метода transfer (a9059cbb)
-        if (!data.startsWith("a9059cbb")) {
-            throw new Error("Not a transfer transaction");
-        }
-
-        try {
-            // Парсим адрес получателя (следующие 64 символа после селектора)
-            const toAddressHex = data.slice(8, 72);
-            const toAddress = this.tronWeb.address.fromHex(
-                "41" + toAddressHex.slice(24)
-            );
-
-            // Парсим сумму (следующие 64 символа)
-            const amountHex = data.slice(72, 136);
-            const amount = parseInt(amountHex, 16) / 1000000; // Конвертируем в USDT
-
-            // Ищем соответствующий платеж
-            const payment = await this.prisma.payment.findFirst({
-                where: {
-                    cryptoAddress: toAddress,
-                    status: PaymentStatus.PENDING,
-                    paymentType: PaymentType.CRYPTO_USDT,
-                    expiresAt: { gte: new Date() },
-                    // Проверяем сумму с небольшим допуском
-                    expectedAmount: {
-                        gte: amount - 0.01,
-                        lte: amount + 0.01,
-                    },
-                },
-                include: { user: true },
-            });
-
-            if (!payment) {
-                console.log(
-                    `No matching USDT payment found for transaction ${txHash}:`,
-                    {
-                        toAddress,
-                        amount,
-                        timestamp: new Date(txInfo.block_timestamp),
-                    }
-                );
-            }
-
-            return payment;
-        } catch (error) {
-            console.error("Error parsing USDT transaction data:", error);
-            throw new Error("Failed to parse USDT transaction");
-        }
-    }
-
     private async createSubscription(tx: any, payment: any) {
         const duration = this.getPlanDuration(payment.planType);
         const channelId = process.env.CHANNEL_ID!;
-        await this.bot.unbanChatMember(
-            channelId,
-            payment.user.telegramId as any
-        );
+
+        try {
+            await this.bot.unbanChatMember(
+                channelId,
+                payment.user.telegramId as any
+            );
+        } catch (error) {
+            console.log(
+                "User was not banned or error unbanning:",
+                error.message
+            );
+        }
+
         // Ищем существующую активную подписку пользователя
         const existingSubscription = await tx.subscription.findFirst({
             where: {
@@ -379,7 +323,6 @@ export class PaymentService {
                 data: {
                     endDate: endDate,
                     planType: payment.planType, // Обновляем план на новый
-                    // paymentId не обновляем - оставляем исходный
                 },
             });
 
@@ -428,17 +371,19 @@ export class PaymentService {
     }
 
     private getPlanPrices() {
-        // const prices = {
-        //     [PlanType.DAY]: { stars: 399, trx: 10, usdt: 10 },
-        //     [PlanType.WEEK]: { stars: 599, trx: 60, usdt: 19 },
-        //     [PlanType.MONTH]: { stars: 2500, trx: 200, usdt: 50 },
-        // };
-        // TODO - test data
         const prices = {
-            [PlanType.DAY]: { stars: 1, trx: 10, usdt: 0.1 },
-            [PlanType.WEEK]: { stars: 1, trx: 60, usdt: 0.1 },
-            [PlanType.MONTH]: { stars: 1, trx: 200, usdt: 0.1 },
+            [PlanType.DAY]: { stars: 1, usdt: 12 },
+            [PlanType.WEEK]: { stars: 1, usdt: 19 },
+            [PlanType.MONTH]: { stars: 1, usdt: 50 },
         };
+
+        // Продакшн цены:
+        // const prices = {
+        //     [PlanType.DAY]: { stars: 399, usdt: 10 },
+        //     [PlanType.WEEK]: { stars: 599, usdt: 19 },
+        //     [PlanType.MONTH]: { stars: 2500, usdt: 50 },
+        // };
+
         return prices;
     }
 
@@ -448,12 +393,14 @@ export class PaymentService {
             [PlanType.WEEK]: 7 * 24 * 60 * 60 * 1000,
             [PlanType.MONTH]: 30 * 24 * 60 * 60 * 1000,
         };
+
         // TODO - test data
         // const durations = {
         //     [PlanType.DAY]: 60 * 5 * 1000,
         //     [PlanType.WEEK]: 60 * 10 * 1000,
         //     [PlanType.MONTH]: 60 * 15 * 1000,
         // };
+
         return durations[planType];
     }
 
@@ -464,9 +411,5 @@ export class PaymentService {
             [PlanType.MONTH]: "месяц",
         };
         return names[planType];
-    }
-
-    private generatePaymentAddress(): string {
-        return process.env.CRYPTO_WALLET_ADDRESS!;
     }
 }

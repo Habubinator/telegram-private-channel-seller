@@ -17,8 +17,7 @@
         "axios": "^1.11.0",
         "dotenv": "^16.3.1",
         "node-cron": "^3.0.3",
-        "node-telegram-bot-api": "^0.66.0",
-        "tronweb": "^5.3.2"
+        "node-telegram-bot-api": "^0.66.0"
     },
     "devDependencies": {
         "@types/node": "^20.10.5",

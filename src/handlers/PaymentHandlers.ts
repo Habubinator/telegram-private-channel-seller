@@ -17,6 +17,10 @@ export class PaymentHandlers {
                 command: "start",
                 description: "Подписаться на канал",
             },
+            {
+                command: "check",
+                description: "Проверить статус платежа",
+            },
         ]);
 
         // Обработка запроса на вступление в группу/канал
@@ -176,7 +180,7 @@ export class PaymentHandlers {
             }
         });
 
-        // Обработка команд выбора тарифа
+        // Обработка команды /start
         this.bot.onText(/\/start/, async (msg) => {
             const keyboard = {
                 inline_keyboard: [
@@ -193,7 +197,92 @@ export class PaymentHandlers {
             );
         });
 
-        // Обработка назад
+        // Обработка команды /check для проверки крипто-платежа
+        this.bot.onText(/\/check/, async (msg) => {
+            try {
+                const userId = await this.getOrCreateUser(msg.from!);
+
+                // Ищем последний pending крипто-платеж пользователя
+                const pendingPayment = await this.prisma.payment.findFirst({
+                    where: {
+                        userId: userId,
+                        status: "PENDING",
+                        paymentType: "CRYPTO_USDT",
+                    },
+                    orderBy: {
+                        createdAt: "desc",
+                    },
+                });
+
+                if (!pendingPayment || !pendingPayment.cryptoTxHash) {
+                    await this.bot.sendMessage(
+                        msg.chat.id,
+                        "❌ У вас нет ожидающих крипто-платежей для проверки."
+                    );
+                    return;
+                }
+
+                await this.bot.sendMessage(
+                    msg.chat.id,
+                    "🔄 Проверяю статус платежа..."
+                );
+
+                const result =
+                    await this.paymentService.checkCryptoPaymentStatus(
+                        pendingPayment.cryptoTxHash
+                    );
+
+                if (
+                    result.statusChanged &&
+                    result.nowPayment.payment_status === "finished"
+                ) {
+                    // Платеж успешен
+                    const inviteLink = await this.createInviteLink();
+                    const keyboard = {
+                        inline_keyboard: [
+                            [
+                                {
+                                    text: "🔗 Войти в канал",
+                                    url: inviteLink,
+                                },
+                            ],
+                        ],
+                    };
+
+                    await this.bot.sendMessage(
+                        msg.chat.id,
+                        "✅ Платеж подтвержден! Подписка активирована.",
+                        { reply_markup: keyboard }
+                    );
+                } else if (
+                    ["failed", "refunded", "expired"].includes(
+                        result.nowPayment.payment_status
+                    )
+                ) {
+                    await this.bot.sendMessage(
+                        msg.chat.id,
+                        "❌ Платеж не прошел. Попробуйте создать новый платеж."
+                    );
+                } else {
+                    // Платеж еще обрабатывается
+                    const statusText = this.getPaymentStatusText(
+                        result.nowPayment.payment_status
+                    );
+                    await this.bot.sendMessage(
+                        msg.chat.id,
+                        `⏳ Статус платежа: ${statusText}\n\nПовторите команду /check через несколько минут.`
+                    );
+                }
+            } catch (error) {
+                console.error("Error checking payment:", error);
+                await this.bot.sendMessage(
+                    msg.chat.id,
+                    "❌ Ошибка при проверке платежа. Попробуйте позже."
+                );
+            }
+        });
+
+        // Обработка возврата к выбору тарифов
         this.bot.on("callback_query", async (query) => {
             if (!query.data?.startsWith("back_to_plans")) return;
 
@@ -266,33 +355,49 @@ export class PaymentHandlers {
                     await this.bot.answerCallbackQuery(query.id, {
                         text: "Инвойс отправлен! Проверьте сообщения.",
                     });
-                } else {
-                    const { payment, address } =
+                } else if (paymentType === "usdt") {
+                    const result =
                         await this.paymentService.createCryptoPayment(
                             userId,
-                            planType as PlanType,
-                            paymentType.toUpperCase() as "TRX" | "USDT"
+                            planType as PlanType
                         );
 
+                    const keyboard = {
+                        inline_keyboard: [
+                            [
+                                {
+                                    text: "🔄 Проверить платеж",
+                                    callback_data: `check_payment_${result.paymentId}`,
+                                },
+                            ],
+                            [
+                                {
+                                    text: "ℹ️ Инструкция по оплате",
+                                    callback_data: `payment_info_${result.paymentId}`,
+                                },
+                            ],
+                        ],
+                    };
+
                     const message = `
-💳 Крипто-платеж ${paymentType.toUpperCase()}
+💳 **Крипто-платеж USDT TRC20**
 
-📋 **Данные для оплаты:**
-💰 Сумма: ${payment.amount} ${payment.currency}
-📍 Адрес: \`${address}\`
-🆔 ID платежа: \`${payment.id}\`
+💰 **Сумма:** \`${result.amount}\` USDT
+📍 **Адрес:** \`${result.address}\`
+🆔 **ID платежа:** \`${result.paymentId}\`
 
-⏰ Время на оплату: 60 минут
-⚠️ Отправьте точную сумму на указанный адрес
+⏰ **Время на оплату:** 60 минут
+⚠️ **Важно:** Отправьте точную сумму на указанный адрес
 
-После оплаты подписка активируется автоматически.
-          `;
+После отправки используйте команду /check или нажмите кнопку "Проверить платеж"
+                    `;
 
                     await this.bot.sendMessage(
                         query.message!.chat.id,
                         message,
                         {
                             parse_mode: "Markdown",
+                            reply_markup: keyboard,
                         }
                     );
 
@@ -307,6 +412,128 @@ export class PaymentHandlers {
                     show_alert: true,
                 });
             }
+        });
+
+        // Обработка проверки конкретного платежа
+        this.bot.on("callback_query", async (query) => {
+            if (!query.data?.startsWith("check_payment_")) return;
+
+            const paymentId = query.data.split("check_payment_")[1];
+
+            try {
+                await this.bot.answerCallbackQuery(query.id, {
+                    text: "🔄 Проверяю платеж...",
+                });
+
+                const result =
+                    await this.paymentService.checkCryptoPaymentStatus(
+                        paymentId
+                    );
+
+                if (
+                    result.statusChanged &&
+                    result.nowPayment.payment_status === "finished"
+                ) {
+                    // Платеж успешен
+                    const inviteLink = await this.createInviteLink();
+                    const keyboard = {
+                        inline_keyboard: [
+                            [
+                                {
+                                    text: "🔗 Войти в канал",
+                                    url: inviteLink,
+                                },
+                            ],
+                        ],
+                    };
+
+                    await this.bot.editMessageText(
+                        "✅ Платеж подтвержден! Подписка активирована.",
+                        {
+                            chat_id: query.message!.chat.id,
+                            message_id: query.message!.message_id,
+                            reply_markup: keyboard,
+                        }
+                    );
+                } else if (
+                    ["failed", "refunded", "expired"].includes(
+                        result.nowPayment.payment_status
+                    )
+                ) {
+                    await this.bot.editMessageText(
+                        "❌ Платеж не прошел. Попробуйте создать новый платеж командой /start",
+                        {
+                            chat_id: query.message!.chat.id,
+                            message_id: query.message!.message_id,
+                        }
+                    );
+                } else {
+                    // Платеж еще обрабатывается
+                    const statusText = this.getPaymentStatusText(
+                        result.nowPayment.payment_status
+                    );
+
+                    const keyboard = {
+                        inline_keyboard: [
+                            [
+                                {
+                                    text: "🔄 Проверить еще раз",
+                                    callback_data: `check_payment_${paymentId}`,
+                                },
+                            ],
+                        ],
+                    };
+
+                    await this.bot.editMessageText(
+                        `⏳ Статус платежа: ${statusText}\n\nПопробуйте проверить через несколько минут.`,
+                        {
+                            chat_id: query.message!.chat.id,
+                            message_id: query.message!.message_id,
+                            reply_markup: keyboard,
+                        }
+                    );
+                }
+            } catch (error) {
+                console.error("Error checking payment:", error);
+                await this.bot.answerCallbackQuery(query.id, {
+                    text: "❌ Ошибка при проверке платежа",
+                    show_alert: true,
+                });
+            }
+        });
+
+        // Обработка информации о платеже
+        this.bot.on("callback_query", async (query) => {
+            if (!query.data?.startsWith("payment_info_")) return;
+
+            const infoText = `
+📋 **Инструкция по оплате USDT TRC20:**
+
+1️⃣ Откройте ваш крипто-кошелек
+2️⃣ Выберите отправку USDT в сети TRON (TRC20)
+3️⃣ Скопируйте адрес получателя из сообщения выше
+4️⃣ Введите точную сумму (очень важно!)
+5️⃣ Отправьте транзакцию
+6️⃣ Используйте команду /check для проверки
+
+⚠️ **Важные моменты:**
+• Используйте только сеть TRON (TRC20)
+• Отправьте точную сумму
+• Комиссия сети оплачивается отдельно
+• Платеж действителен 60 минут
+
+❓ **Популярные кошельки с поддержкой TRC20:**
+• TronLink, Trust Wallet, Atomic Wallet
+• Биржи: Binance, Huobi, OKEx
+            `;
+
+            await this.bot.answerCallbackQuery(query.id, {
+                text: "Инструкция отправлена!",
+            });
+
+            await this.bot.sendMessage(query.message!.chat.id, infoText, {
+                parse_mode: "Markdown",
+            });
         });
     }
 
@@ -347,6 +574,7 @@ export class PaymentHandlers {
             return inviteLink.invite_link;
         } catch (error) {
             console.error("Error creating invite link:", error);
+            throw new Error("Failed to create invite link");
         }
     }
 
@@ -393,5 +621,21 @@ export class PaymentHandlers {
             [PlanType.MONTH]: "месяц",
         };
         return names[planType];
+    }
+
+    private getPaymentStatusText(status: string): string {
+        const statusMap: { [key: string]: string } = {
+            waiting: "Ожидает оплаты",
+            confirming: "Подтверждается в блокчейне",
+            confirmed: "Подтверждено, обрабатывается",
+            sending: "Отправляется",
+            partially_paid: "Частично оплачено",
+            finished: "Завершено",
+            failed: "Неудачно",
+            refunded: "Возвращено",
+            expired: "Истекло",
+        };
+
+        return statusMap[status] || status;
     }
 }

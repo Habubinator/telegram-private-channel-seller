@@ -140,11 +140,7 @@ export class PaymentService {
     }
 
     // Проверка статуса крипто-платежа
-    async checkCryptoPaymentStatus(paymentId: string): Promise<{
-        payment: any;
-        nowPayment: NOWPayment;
-        statusChanged: boolean;
-    }> {
+    async checkCryptoPaymentStatus(paymentId: string) {
         try {
             // Получаем наш платеж из БД
             const payment = await this.prisma.payment.findUnique({
@@ -377,7 +373,7 @@ export class PaymentService {
         });
     }
 
-    private getPlanPrices() {
+    getPlanPrices() {
         const prices = {
             [PlanType.DAY]: { stars: 1, usdt: 21 },
             [PlanType.WEEK]: { stars: 1, usdt: 30 },
@@ -394,7 +390,7 @@ export class PaymentService {
         return prices;
     }
 
-    private getPlanDuration(planType: PlanType): number {
+    getPlanDuration(planType: PlanType): number {
         const durations = {
             [PlanType.DAY]: 24 * 60 * 60 * 1000,
             [PlanType.WEEK]: 7 * 24 * 60 * 60 * 1000,
@@ -411,7 +407,7 @@ export class PaymentService {
         return durations[planType];
     }
 
-    private getPlanName(planType: PlanType): string {
+    getPlanName(planType: PlanType): string {
         const names = {
             [PlanType.DAY]: "day",
             [PlanType.WEEK]: "week",

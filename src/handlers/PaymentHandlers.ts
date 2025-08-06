@@ -23,6 +23,153 @@ export class PaymentHandlers {
             },
         ]);
 
+        this.bot.onText(/^(📋\s*)?Pricing$/i, async (msg) => {
+            const keyboard = {
+                inline_keyboard: [
+                    [{ text: "📅 For a day", callback_data: "plan_DAY" }],
+                    [{ text: "📅 For a week", callback_data: "plan_WEEK" }],
+                    [{ text: "📅 For a month", callback_data: "plan_MONTH" }],
+                ],
+            };
+            await this.bot.sendMessage(
+                msg.chat.id,
+                `Select a subscription plan:`,
+                { reply_markup: keyboard }
+            );
+        });
+
+        // Handler for "My Subscription" button
+        this.bot.onText(/^(👤\s*)?My Subscription$/i, async (msg) => {
+            try {
+                const userId = await this.getOrCreateUser(msg.from!);
+
+                // Get active subscriptions
+                const activeSubscriptions =
+                    await this.prisma.subscription.findMany({
+                        where: {
+                            userId: userId,
+                            isActive: true,
+                            endDate: { gte: new Date() },
+                        },
+                        include: {
+                            payment: true,
+                        },
+                        orderBy: {
+                            endDate: "desc",
+                        },
+                    });
+
+                // Get recent payments
+                const recentPayments = await this.prisma.payment.findMany({
+                    where: {
+                        userId: userId,
+                    },
+                    orderBy: {
+                        createdAt: "desc",
+                    },
+                    take: 3,
+                });
+
+                if (activeSubscriptions.length > 0) {
+                    const subscription = activeSubscriptions[0];
+                    const endDate = subscription.endDate.toLocaleString(
+                        "en-US",
+                        {
+                            year: "numeric",
+                            month: "long",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                        }
+                    );
+
+                    const planName = this.getPlanName(subscription.planType);
+                    const daysLeft = Math.ceil(
+                        (subscription.endDate.getTime() -
+                            new Date().getTime()) /
+                            (1000 * 60 * 60 * 24)
+                    );
+
+                    const keyboard = {
+                        inline_keyboard: [
+                            [
+                                {
+                                    text: "🔄 Renew Subscription",
+                                    callback_data: "back_to_plans",
+                                },
+                            ],
+                        ],
+                    };
+
+                    const message = `
+✅ **Your subscription is active!**
+
+📅 **Plan:** ${planName}
+⏰ **Valid until:** ${endDate}
+⏳ **Days remaining:** ${daysLeft}
+
+💎 **Status:** Active
+🔗 **Channel access:** Granted
+            `;
+
+                    await this.bot.sendMessage(msg.chat.id, message, {
+                        parse_mode: "Markdown",
+                        reply_markup: keyboard,
+                    });
+                } else {
+                    const keyboard = {
+                        inline_keyboard: [
+                            [
+                                {
+                                    text: "📋 Choose Plan",
+                                    callback_data: "back_to_plans",
+                                },
+                            ],
+                        ],
+                    };
+
+                    let message =
+                        "❌ **You don't have an active subscription**\n\n";
+
+                    if (recentPayments.length > 0) {
+                        const lastPayment = recentPayments[0];
+                        const statusEmoji = {
+                            PENDING: "⏳",
+                            COMPLETED: "✅",
+                            EXPIRED: "⏰",
+                            FAILED: "❌",
+                        };
+
+                        message += `📋 **Last payment:**\n`;
+                        message += `${statusEmoji[lastPayment.status]} ${
+                            lastPayment.status === "PENDING"
+                                ? "Awaiting payment"
+                                : lastPayment.status === "COMPLETED"
+                                ? "Completed"
+                                : lastPayment.status === "EXPIRED"
+                                ? "Expired"
+                                : "Failed"
+                        }\n`;
+                        message += `💰 ${lastPayment.amount} ${lastPayment.currency}\n\n`;
+                    }
+
+                    message +=
+                        "To get access to the channel, please select and pay for a plan.";
+
+                    await this.bot.sendMessage(msg.chat.id, message, {
+                        parse_mode: "Markdown",
+                        reply_markup: keyboard,
+                    });
+                }
+            } catch (error) {
+                console.error("Error showing subscription info:", error);
+                await this.bot.sendMessage(
+                    msg.chat.id,
+                    "❌ Error loading subscription information. Please try again later."
+                );
+            }
+        });
+
         // Обработка запроса на вступление в группу/канал
         this.bot.on("chat_join_request", async (chatJoinRequest) => {
             try {
@@ -195,7 +342,19 @@ export class PaymentHandlers {
 ❤️‍🔥Quick and confidential. 
 ❤️‍🔥Photos, videos and interactive content that is actively updated. 
 ❤️‍🔥You can see the entire archive, and I never delete old content.
-❤️‍🔥Click start to join👇🏼`
+❤️‍🔥Click start to join👇🏼`,
+                {
+                    reply_markup: {
+                        keyboard: [
+                            [
+                                { text: "📋 Pricing" },
+                                { text: "👤 My Subscription" },
+                            ],
+                        ],
+                        resize_keyboard: true,
+                        one_time_keyboard: false,
+                    },
+                }
             );
             await this.bot.sendMessage(
                 msg.chat.id,
@@ -569,7 +728,7 @@ After sending, use the /check command or click the “Check payment” button
                 process.env.CHANNEL_ID!,
                 {
                     name: `Invite_${Date.now()}`,
-                    expire_date: Math.floor(Date.now() / 1000) + 60 * 100,
+                    expire_date: Math.floor(Date.now() / 1000) + 60 * 60 * 24,
                     member_limit: 1, // Только для одного пользователя
                     creates_join_request: false, // Прямое добавление без запроса
                 }
